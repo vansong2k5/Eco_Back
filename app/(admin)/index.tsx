@@ -6,7 +6,7 @@ import { FontSize, FontWeight } from '../../src/constants/typography';
 import { Spacing, Radius } from '../../src/constants/spacing';
 import { useAuthStore } from '../../src/store/auth.store';
 import { AppButton } from '../../src/components/common/AppButton';
-import { collection, getCountFromServer, getAggregateFromServer, sum } from 'firebase/firestore';
+import { collection, getDocs, sum } from 'firebase/firestore';
 import { db } from '../../src/config/firebase';
 import { useRouter } from 'expo-router';
 import { TransactionService } from '../../src/services/transaction.service';
@@ -16,7 +16,7 @@ export default function AdminDashboardScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ totalUsers: 0, issuedPoints: 0, totalRecycled: 0, co2Saved: 0, fraudCount: 0 });
-  const [fraudUsersList, setFraudUsersList] = useState<string[]>([]);
+  const [fraudUsersList, setFraudUsersList] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [chartFilter, setChartFilter] = useState<'all' | 'company' | 'individual'>('all');
 
@@ -25,86 +25,88 @@ export default function AdminDashboardScreen() {
       try {
         const usersRef = collection(db, 'users');
 
-        import('firebase/firestore').then(async ({ getDocs, collection }) => {
-           let totalKg = 0;
-           let validIssuedPoints = 0;
-           let monthlyTotals = Array(6).fill(0); // [Tháng hiện tại - 5, ..., Tháng hiện tại]
-           const currentMonth = new Date().getMonth();
-           
-           let fraudMap = new Map<string, number>();
-           
-           const userSnap = await getDocs(usersRef);
-           const usersCount = userSnap.docs.filter(d => d.data().role !== 'ADMIN').length;
-           
-           const txSnap = await getDocs(collection(db, 'transactions'));
-           
-           txSnap.forEach(doc => {
-             const rawTx = { id: doc.id, ...doc.data() } as any;
-             const parsedTx = TransactionService.evaluateTransaction(rawTx);
+        let totalKg = 0;
+        let validIssuedPoints = 0;
+        let monthlyTotals = Array(6).fill(0); // [Tháng hiện tại - 5, ..., Tháng hiện tại]
+        const currentMonth = new Date().getMonth();
+        
+        let fraudMap = new Map<string, number>();
+        let usersCache = new Map<string, any>();
+        
+        const userSnap = await getDocs(usersRef);
+        userSnap.forEach((d: any) => usersCache.set(d.id, d.data()));
+        
+        const usersCount = userSnap.docs.filter((d: any) => d.data().role !== 'ADMIN').length;
+        
+        const txSnap = await getDocs(collection(db, 'transactions'));
+        
+        txSnap.forEach((doc: any) => {
+          const rawTx = { id: doc.id, ...doc.data() } as any;
+          const parsedTx = TransactionService.evaluateTransaction(rawTx);
 
-             let riskTraits = 0;
-             const safeAmount = parsedTx.amount || 0;
+          let riskTraits = 0;
+          const safeAmount = parsedTx.amount || 0;
 
-             if (parsedTx.status === 'APPROVED' || parsedTx.status === 'COMPLETED') {
-                if (parsedTx.type === 'EARN' || parsedTx.type === 'ORDER') {
-                   validIssuedPoints += safeAmount;
-                }
-                if (parsedTx.kg) {
-                   totalKg += parsedTx.kg;
-                }
+          if (parsedTx.status === 'APPROVED' || parsedTx.status === 'COMPLETED') {
+             if (parsedTx.type === 'EARN' || parsedTx.type === 'ORDER') {
+                validIssuedPoints += safeAmount;
              }
-
-             // Check Fraud signals
-             if (safeAmount > 100) riskTraits += 1;
-             if (parsedTx.kg && parsedTx.kg > 20) riskTraits += 1;
-             if (!parsedTx.qrId && parsedTx.type === 'EARN') riskTraits += 2;
-             if (parsedTx.status === 'EXPIRED' || parsedTx.status === 'CANCELLED') riskTraits += 1;
-             
-             if (riskTraits > 0 && parsedTx.userId) {
-                fraudMap.set(parsedTx.userId, (fraudMap.get(parsedTx.userId) || 0) + riskTraits);
+             if (parsedTx.kg) {
+                totalKg += parsedTx.kg;
              }
+          }
 
-             if (parsedTx.createdAt) {
-               const docDate = (parsedTx.createdAt as any).toDate ? (parsedTx.createdAt as any).toDate() : new Date(parsedTx.createdAt);
-               let monthDiff = currentMonth - docDate.getMonth();
-               if (monthDiff < 0) monthDiff += 12;
-               
-               if (monthDiff < 6) {
-                 monthlyTotals[5 - monthDiff] += (parsedTx.kg || 0);
-               }
-             }
-           });
+          // Check Fraud signals
+          if (safeAmount > 100) riskTraits += 1;
+          if (parsedTx.kg && parsedTx.kg > 20) riskTraits += 1;
+          if (!parsedTx.qrId && parsedTx.type === 'EARN') riskTraits += 2;
+          if (parsedTx.status === 'EXPIRED' || parsedTx.status === 'CANCELLED') riskTraits += 1;
+          
+          if (riskTraits > 0 && parsedTx.userId) {
+             fraudMap.set(parsedTx.userId, (fraudMap.get(parsedTx.userId) || 0) + riskTraits);
+          }
 
-           let fraudUsers = 0;
-           let fraudIDs: string[] = [];
-           fraudMap.forEach((score, uid) => {
-             if (score >= 2) {
-                fraudUsers++;
-                fraudIDs.push(uid);
-             }
-           });
-           setFraudUsersList(fraudIDs);
-
-           setStats({
-             totalUsers: usersCount,
-             issuedPoints: validIssuedPoints,
-             totalRecycled: totalKg,
-             co2Saved: totalKg * 2.5,
-             fraudCount: fraudUsers
-           });
-
-           // Format ra giao diện
-           const newChartData = monthlyTotals.map((val, idx) => {
-             let labelMonth = currentMonth - 5 + idx;
-             if (labelMonth < 0) labelMonth += 12;
-             return {
-               label: `T${labelMonth + 1}`,
-               value: val,
-               height: val === 0 ? '5%' : `${Math.min(Math.max((val / 50) * 100, 10), 100)}%`
-             };
-           });
-           setChartData(newChartData);
+          if (parsedTx.createdAt) {
+            const docDate = (parsedTx.createdAt as any).toDate ? (parsedTx.createdAt as any).toDate() : new Date(parsedTx.createdAt);
+            let monthDiff = currentMonth - docDate.getMonth();
+            if (monthDiff < 0) monthDiff += 12;
+            
+            if (monthDiff < 6) {
+              monthlyTotals[5 - monthDiff] += (parsedTx.kg || 0);
+            }
+          }
         });
+
+        let fraudUsers = 0;
+        let fraudProfiles: any[] = [];
+        fraudMap.forEach((score, uid) => {
+          if (score >= 2) {
+             fraudUsers++;
+             const u = usersCache.get(uid);
+             fraudProfiles.push({ uid, score, email: u?.email, name: u?.displayName });
+          }
+        });
+        setFraudUsersList(fraudProfiles);
+
+        setStats({
+          totalUsers: usersCount,
+          issuedPoints: validIssuedPoints,
+          totalRecycled: totalKg,
+          co2Saved: totalKg * 2.5,
+          fraudCount: fraudUsers
+        });
+
+        // Format ra giao diện
+        const newChartData = monthlyTotals.map((val, idx) => {
+          let labelMonth = currentMonth - 5 + idx;
+          if (labelMonth < 0) labelMonth += 12;
+          return {
+            label: `T${labelMonth + 1}`,
+            value: val,
+            height: val === 0 ? '5%' : `${Math.min(Math.max((val / 50) * 100, 10), 100)}%`
+          };
+        });
+        setChartData(newChartData);
 
       } catch (error) {
         console.warn('Lỗi lấy thống kê:', error);
@@ -225,7 +227,8 @@ export default function AdminDashboardScreen() {
           variant="outline" 
           size="sm" 
           onPress={() => {
-            Alert.alert('Danh Sách Đen (Fraud IDs)', fraudUsersList.length ? fraudUsersList.join('\n') : 'Tuyệt vời! Không có dấu hiệu vi phạm nào.');
+            const details = fraudUsersList.map(u => `- Tên: ${u.name || 'Vô danh'}\n  Email: ${u.email || u.uid}\n  Rủi ro: ${u.score} lỗi`).join('\n\n');
+            Alert.alert('Danh Sách Đen (Fraud IDs)', fraudUsersList.length ? details : 'Tuyệt vời! Không có dấu hiệu vi phạm nào.');
           }} 
           style={{marginTop: Spacing.md}} 
         />
