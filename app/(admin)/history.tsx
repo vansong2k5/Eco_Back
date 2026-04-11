@@ -46,37 +46,31 @@ export default function AdminHistoryScreen() {
                    
                    const userSnap = await t.get(userRef);
                    
-                   if (!userSnap.exists()) {
-                     throw new Error('User does not exist');
-                   }
+                   const userData = userSnap.exists() ? userSnap.data() : null;
                    
-                   const userData = userSnap.data();
-                   
-                   // Nếu đây là giao dịch nhận thưởng (EARN), ta CỘNG điểm
-                   // Nếu đây là giao dịch đổi quà (REDEEM/ORDER), user đã trừ lúc tạo bill rồi,
-                   // nên duyệt đơn giản là xác nhận vật lý. Tuỳ theo logic gốc.
-                   // Ở đây mặc định Earn -> Cộng, Order (với tư cách là gom rác -> Cộng)
-                   let finalPoints = userData.ecoPoints || 0;
-                   if (tx.type === 'EARN' || tx.type === 'ORDER') {
-                      finalPoints += (tx.amount || 0);
-                   }
-                   // Trọng lượng rác tái chế (kg)
-                   let finalRecycled = userData.totalRecycled || 0;
-                   if (tx.kg) {
-                      finalRecycled += tx.kg;
-                   }
-
                    t.update(txRef, { 
                      status: newStatus,
                      approvedAt: Timestamp.now()
                    });
-                   
-                   t.update(userRef, {
-                     ecoPoints: finalPoints,
-                     totalRecycled: finalRecycled
-                   });
+
+                   if (userData) {
+                     // Nâng cấp số liệu user nếu user tồn tại
+                     let finalPoints = userData.ecoPoints || 0;
+                     if (tx.type === 'EARN' || tx.type === 'ORDER') {
+                        finalPoints += (tx.amount || 0);
+                     }
+                     let finalRecycled = userData.totalRecycled || 0;
+                     if (tx.kg) {
+                        finalRecycled += tx.kg;
+                     }
+                     
+                     t.update(userRef, {
+                       ecoPoints: finalPoints,
+                       totalRecycled: finalRecycled
+                     });
+                   }
                  });
-                 Alert.alert('Thành công', 'Đã duyệt giao dịch và cộng thông số vào người dùng!');
+                 Alert.alert('Thành công', 'Đã duyệt giao dịch thành công (các thông số hợp lệ đã được cộng)!');
                  fetchHistory();
                }).catch(e => {
                  console.warn(e);
