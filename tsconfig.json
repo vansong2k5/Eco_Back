@@ -3,9 +3,16 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "@src/*": ["./src/*"],
+      "@src/constants/*": ["./src/constants/*"],
+      "@src/components/*": ["./src/components/*"],
+      "@src/store/*": ["./src/store/*"],
+      "@src/utils/*": ["./src/utils/*"],
+      "@src/types/*": ["./src/types/*"],
+      "@src/services/*": ["./src/services/*"],
+      "@src/screens/*": ["./src/screens/*"],
+      "@src/config/*": ["./src/config/*"]
     }
   },
   "include": [
@@ -13,5 +20,12 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "ecoback-backend",
+    "internal"
   ]
 }
+
+

@@ -24,8 +24,6 @@ export default function AdminDashboardScreen() {
     const fetchStats = async () => {
       try {
         const usersRef = collection(db, 'users');
-        const countSnap = await getCountFromServer(usersRef);
-        const usersCount = countSnap.data().count || 0;
 
         import('firebase/firestore').then(async ({ getDocs, collection }) => {
            let totalKg = 0;
@@ -34,6 +32,9 @@ export default function AdminDashboardScreen() {
            const currentMonth = new Date().getMonth();
            
            let fraudMap = new Map<string, number>();
+           
+           const userSnap = await getDocs(usersRef);
+           const usersCount = userSnap.docs.filter(d => d.data().role !== 'ADMIN').length;
            
            const txSnap = await getDocs(collection(db, 'transactions'));
            
@@ -224,9 +225,7 @@ export default function AdminDashboardScreen() {
           variant="outline" 
           size="sm" 
           onPress={() => {
-             import('react-native').then(({ Alert }) => {
-                Alert.alert('Danh Sách Đen (Fraud IDs)', fraudUsersList.length ? fraudUsersList.join('\n') : 'Tuyệt vời! Không có dấu hiệu vi phạm nào.');
-             });
+            Alert.alert('Danh Sách Đen (Fraud IDs)', fraudUsersList.length ? fraudUsersList.join('\n') : 'Tuyệt vời! Không có dấu hiệu vi phạm nào.');
           }} 
           style={{marginTop: Spacing.md}} 
         />
