@@ -16,6 +16,7 @@ export default function AdminDashboardScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ totalUsers: 0, issuedPoints: 0, totalRecycled: 0, co2Saved: 0, fraudCount: 0 });
+  const [fraudUsersList, setFraudUsersList] = useState<string[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [chartFilter, setChartFilter] = useState<'all' | 'company' | 'individual'>('all');
 
@@ -74,9 +75,14 @@ export default function AdminDashboardScreen() {
            });
 
            let fraudUsers = 0;
-           fraudMap.forEach(score => {
-             if (score >= 2) fraudUsers++;
+           let fraudIDs: string[] = [];
+           fraudMap.forEach((score, uid) => {
+             if (score >= 2) {
+                fraudUsers++;
+                fraudIDs.push(uid);
+             }
            });
+           setFraudUsersList(fraudIDs);
 
            setStats({
              totalUsers: usersCount,
@@ -213,7 +219,17 @@ export default function AdminDashboardScreen() {
           <Text style={styles.statLabel}>Tài khoản nghi ngờ (Fraud):</Text>
           <Text style={[styles.statValue, { color: Colors.error }]}>{loading ? '...' : stats.fraudCount} tài khoản</Text>
         </View>
-        <AppButton title="Xem danh sách đen" variant="outline" size="sm" onPress={() => {}} style={{marginTop: Spacing.md}} />
+        <AppButton 
+          title="Xem danh sách đen" 
+          variant="outline" 
+          size="sm" 
+          onPress={() => {
+             import('react-native').then(({ Alert }) => {
+                Alert.alert('Danh Sách Đen (Fraud IDs)', fraudUsersList.length ? fraudUsersList.join('\n') : 'Tuyệt vời! Không có dấu hiệu vi phạm nào.');
+             });
+          }} 
+          style={{marginTop: Spacing.md}} 
+        />
       </View>
 
     </ScrollView>
