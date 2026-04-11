@@ -15,7 +15,7 @@ export default function AdminDashboardScreen() {
   const { profile, logout } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ totalUsers: 0, issuedPoints: 0, totalRecycled: 0, co2Saved: 0 });
+  const [stats, setStats] = useState({ totalUsers: 0, issuedPoints: 0, totalRecycled: 0, co2Saved: 0, fraudCount: 0 });
   const [chartData, setChartData] = useState<any[]>([]);
   const [chartFilter, setChartFilter] = useState<'all' | 'company' | 'individual'>('all');
 
@@ -24,44 +24,66 @@ export default function AdminDashboardScreen() {
       try {
         const usersRef = collection(db, 'users');
         const countSnap = await getCountFromServer(usersRef);
-        
-        const aggPointsSnap = await getAggregateFromServer(collection(db, 'transactions'), {
-          totalPoints: sum('amount')
-        });
-        
+        const usersCount = countSnap.data().count || 0;
+
         import('firebase/firestore').then(async ({ getDocs, collection }) => {
            let totalKg = 0;
+           let validIssuedPoints = 0;
            let monthlyTotals = Array(6).fill(0); // [Tháng hiện tại - 5, ..., Tháng hiện tại]
            const currentMonth = new Date().getMonth();
            
-           // Thay vì getAggregate, fetch tất cả transaction để chạy Lazy Eval
+           let fraudMap = new Map<string, number>();
+           
            const txSnap = await getDocs(collection(db, 'transactions'));
            
            txSnap.forEach(doc => {
              const rawTx = { id: doc.id, ...doc.data() } as any;
              const parsedTx = TransactionService.evaluateTransaction(rawTx);
 
-             if (parsedTx.status === 'APPROVED' && parsedTx.kg) {
-               totalKg += parsedTx.kg;
+             let riskTraits = 0;
+             const safeAmount = parsedTx.amount || 0;
+
+             if (parsedTx.status === 'APPROVED' || parsedTx.status === 'COMPLETED') {
+                if (parsedTx.type === 'EARN' || parsedTx.type === 'ORDER') {
+                   validIssuedPoints += safeAmount;
+                }
+                if (parsedTx.kg) {
+                   totalKg += parsedTx.kg;
+                }
+             }
+
+             // Check Fraud signals
+             if (safeAmount > 100) riskTraits += 1;
+             if (parsedTx.kg && parsedTx.kg > 20) riskTraits += 1;
+             if (!parsedTx.qrId && parsedTx.type === 'EARN') riskTraits += 2;
+             if (parsedTx.status === 'EXPIRED' || parsedTx.status === 'CANCELLED') riskTraits += 1;
+             
+             if (riskTraits > 0 && parsedTx.userId) {
+                fraudMap.set(parsedTx.userId, (fraudMap.get(parsedTx.userId) || 0) + riskTraits);
              }
 
              if (parsedTx.createdAt) {
-               const docDate = parsedTx.createdAt.toDate();
+               const docDate = (parsedTx.createdAt as any).toDate ? (parsedTx.createdAt as any).toDate() : new Date(parsedTx.createdAt);
                let monthDiff = currentMonth - docDate.getMonth();
                if (monthDiff < 0) monthDiff += 12;
                
                if (monthDiff < 6) {
-                 // Gom nhóm dựa theo kg thu gom được
                  monthlyTotals[5 - monthDiff] += (parsedTx.kg || 0);
                }
              }
            });
 
+           let fraudUsers = 0;
+           fraudMap.forEach(score => {
+             if (score >= 2) fraudUsers++;
+           });
+
            setStats({
              totalUsers: usersCount,
-             issuedPoints: totalPoints,
-             totalRecycled: totalKg, // Sửa thành Kg tổng hợp Lazy Eval
-             co2Saved: totalKg * 2.5
+             issuedPoints: validIssuedPoints,
+             totalRecycled: totalKg,
+             co2Saved: totalKg * 2.5,
+             fraudCount: fraudUsers
            });
 
            // Format ra giao diện
@@ -189,7 +211,7 @@ export default function AdminDashboardScreen() {
         </View>
         <View style={styles.statRow}>
           <Text style={styles.statLabel}>Tài khoản nghi ngờ (Fraud):</Text>
-          <Text style={[styles.statValue, { color: Colors.error }]}>0 tài khoản</Text>
+          <Text style={[styles.statValue, { color: Colors.error }]}>{loading ? '...' : stats.fraudCount} tài khoản</Text>
         </View>
         <AppButton title="Xem danh sách đen" variant="outline" size="sm" onPress={() => {}} style={{marginTop: Spacing.md}} />
       </View>
