@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ecoback-backend
+    env: node
+    rootDir: ecoback-backend
+    buildCommand: "npm install && npx prisma generate && npm run build"
+    preDeployCommand: "npx prisma migrate deploy"
+    startCommand: "npm run start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ecoback-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ecoback-redis
+          property: connectionString
+
+  - type: redis
+    name: ecoback-redis
+    ipAllowList: [] # empty array restricts to internal access only
+
+databases:
+  - name: ecoback-db
+    databaseName: ecoback
+    user: ecoback_user
