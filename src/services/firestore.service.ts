@@ -56,13 +56,15 @@ export const RewardService = {
 
   async redeemReward(userId: string, reward: Reward): Promise<Result<void>> {
     try {
-      // Log redemption transaction
+      // Log redemption transaction with explicit COMPLETED status
+      // This is critical: without status, useEcoPoints() breaks
       await addDoc(collection(db, 'transactions'), {
         userId,
         type: 'REDEEM',
         amount: reward.pointsRequired,
         description: `Đổi: ${reward.title}`,
         rewardId: reward.id,
+        status: 'COMPLETED',
         createdAt: serverTimestamp(),
       });
       return ok(undefined);

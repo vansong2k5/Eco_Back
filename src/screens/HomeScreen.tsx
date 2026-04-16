@@ -7,7 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@src/store/auth.store';
-import { useAppStore } from '@src/store/app.store';
+import { useAppStore, useEcoPoints } from '@src/store/app.store';
 import { Colors } from '@src/constants/colors';
 import { FontSize, FontWeight } from '@src/constants/typography';
 import { Spacing, Radius, Shadow } from '@src/constants/spacing';
@@ -20,6 +20,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user, profile } = useAuthStore();
   const { transactions, rewards, subscribeTransactions, fetchRewards } = useAppStore();
+  const dynamicPoints = useEcoPoints();
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  const points = profile?.ecoPoints ?? 0;
+  const points = Math.max(dynamicPoints, profile?.ecoPoints ?? 0);
   const displayName = profile?.displayName || user?.email?.split('@')[0] || 'Bạn';
 
   const quickActions = [

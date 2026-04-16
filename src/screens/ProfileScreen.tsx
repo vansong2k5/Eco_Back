@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform }
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@src/store/auth.store';
+import { useEcoPoints } from '@src/store/app.store';
 import { Card, Divider } from '@src/components/common/UI';
 import { Colors } from '@src/constants/colors';
 import { FontSize, FontWeight } from '@src/constants/typography';
@@ -12,6 +13,8 @@ import { formatPoints, formatDate, getInitials } from '@src/utils/formatters';
 export default function ProfileScreen() {
   const router = useRouter();
   const { profile, user, logout } = useAuthStore();
+  const dynamicPoints = useEcoPoints();
+  const points = Math.max(dynamicPoints, profile?.ecoPoints ?? 0);
 
   const displayName = profile?.displayName || user?.email?.split('@')[0] || 'Người dùng';
   const email = profile?.email || user?.email || '';
@@ -66,7 +69,7 @@ export default function ProfileScreen() {
           <Divider />
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{formatPoints(profile?.ecoPoints ?? 0)}</Text>
+              <Text style={styles.statValue}>{formatPoints(points)}</Text>
               <Text style={styles.statLabel}>EcoPoint</Text>
             </View>
             <View style={styles.statDivider} />

@@ -49,6 +49,15 @@ export default function AdminTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="entity-tracker"
+        options={{
+          title: 'Thực thể',
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialCommunityIcons name={focused ? 'account-search' : 'account-search-outline'} size={26} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="history"
         options={{
           title: 'Lịch sử',

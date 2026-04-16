@@ -34,7 +34,7 @@ export interface Transaction {
   qrId?: string;
   rewardId?: string;
   requestId?: string;
-  status?: 'PROCESSING' | 'PENDING' | 'APPROVED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
+  status?: 'PROCESSING' | 'PENDING' | 'APPROVED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED' | 'REJECTED';
   createdAt: Date;
   expireAt?: Date;
   approvedAt?: Date;
@@ -63,6 +63,7 @@ export interface Reward {
   description: string;
   brand: string;
   imageUrl?: string;
+  fallbackImage?: any;
   pointsRequired: number;
   value: string; // e.g. "50.000 VND"
   category: 'food' | 'transport' | 'shopping' | 'entertainment';

@@ -14,6 +14,7 @@ interface RedeemResult {
   pointsEarned: number;
   transactionId: string;
   qrId: string;
+  recycleCount?: number;
 }
 
 /**
@@ -48,6 +49,7 @@ export async function redeemQRCode(
         pointsEarned: json.data.pointsEarned ?? json.data.points ?? 0,
         transactionId: json.data.transactionId ?? '',
         qrId: json.data.qrId ?? qrData,
+        recycleCount: json.data.recycleCount ?? 1,
       });
     }
 
@@ -81,9 +83,14 @@ async function redeemQRCodeFirestore(
 
     let pointsEarned = 0;
     let transactionId = '';
+    let updatedRecycleCount = 0;
+    let userName = 'Người dùng';
 
     await runTransaction(db, async (txn) => {
+      // 1. ALL READS FIRST
       const qrSnap = await txn.get(qrRef);
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await txn.get(userRef);
 
       if (!qrSnap.exists()) {
         throw { code: 'not-found', message: 'Mã QR không tồn tại trong hệ thống.' };
@@ -99,17 +106,25 @@ async function redeemQRCodeFirestore(
         throw { code: 'expired', message: 'Mã QR này đã hết hạn.' };
       }
 
-      pointsEarned = qrDoc.pointsValue ?? 10;
+      pointsEarned = qrDoc.pointsValue ? Number(qrDoc.pointsValue) : 10;
+      const currentRecycleCount = Number(qrDoc.recycleCount) || 0;
+      updatedRecycleCount = currentRecycleCount + 1;
 
+      if (userSnap.exists()) {
+        userName = userSnap.data().displayName || userSnap.data().email || 'Người dùng';
+      }
+
+      // 2. ALL WRITES AFTER READS
       // Mark QR as consumed
       txn.update(qrRef, {
         status: 'CONSUMED',
         consumedBy: userId,
         consumedAt: serverTimestamp(),
+        recycleCount: updatedRecycleCount,
       });
 
-      // Removed direct user ecoPoints injection here!
-      // The user must deposit rubbish to complete the transaction to get 'APPROVED' status.
+      // pointsEarned and other info is used for the transaction doc below
+      // We don't increment user points here to allow for the 3-5' validation check
     });
 
     // Write transaction log (outside atomic txn for simplicity)
@@ -118,17 +133,18 @@ async function redeemQRCodeFirestore(
 
     const txRef = await addDoc(collection(db, 'transactions'), {
       userId,
+      userName, // Add userName for easier tracking
       type: 'EARN',
-      amount: 0, // IMPORTANT: Points are zero until fully approved!
-      description: `Quét mã QR thu gom chờ xử lý`,
+      amount: pointsEarned,
+      description: `Thu gom rác - Quét bởi ${userName}`,
       qrId: qrData,
-      status: 'PROCESSING',
+      status: 'PROCESSING', // Changed to PROCESSING for validation period
       createdAt: serverTimestamp(),
       expireAt: expireDate
     });
     transactionId = txRef.id;
 
-    return ok({ pointsEarned, transactionId, qrId: qrData });
+    return ok({ pointsEarned, transactionId, qrId: qrData, recycleCount: updatedRecycleCount });
   } catch (e: any) {
     if (e?.code === 'already_used') {
       return err('already_used', e.message);

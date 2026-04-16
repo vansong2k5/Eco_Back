@@ -1,0 +1,2 @@
+src/constants/logoBase64.ts(1,31): error TS1005: ',' expected.
+src/constants/logoBase64.ts(1,37): error TS1005: ',' expected.

@@ -6,16 +6,26 @@ import { FontSize, FontWeight } from '../../src/constants/typography';
 import { Spacing, Radius } from '../../src/constants/spacing';
 import { useAuthStore } from '../../src/store/auth.store';
 import { AppButton } from '../../src/components/common/AppButton';
-import { collection, getDocs, sum } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../src/config/firebase';
 import { useRouter } from 'expo-router';
 import { TransactionService } from '../../src/services/transaction.service';
+
+const KG_PER_POINT = 0.1; // 10 EcoPoints = 1 kg rác
 
 export default function AdminDashboardScreen() {
   const { profile, logout } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ totalUsers: 0, issuedPoints: 0, totalRecycled: 0, co2Saved: 0, fraudCount: 0 });
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    issuedPoints: 0,
+    totalRecycled: 0,      // kg tổng từ QR đã quét
+    totalRecycledCo: 0,    // kg từ Công ty
+    totalRecycledIn: 0,    // kg từ Cá nhân
+    co2Saved: 0,
+    fraudCount: 0
+  });
   const [fraudUsersList, setFraudUsersList] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [chartFilter, setChartFilter] = useState<'all' | 'company' | 'individual'>('all');
@@ -23,57 +33,69 @@ export default function AdminDashboardScreen() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        // ── 1. User count ─────────────────────────────────────────────────────
         const usersRef = collection(db, 'users');
-
-        let totalKg = 0;
-        let validIssuedPoints = 0;
-        let monthlyTotals = Array(6).fill(0); // [Tháng hiện tại - 5, ..., Tháng hiện tại]
-        const currentMonth = new Date().getMonth();
-        
-        let fraudMap = new Map<string, number>();
-        let usersCache = new Map<string, any>();
-        
         const userSnap = await getDocs(usersRef);
+        let usersCache = new Map<string, any>();
         userSnap.forEach((d: any) => usersCache.set(d.id, d.data()));
-        
         const usersCount = userSnap.docs.filter((d: any) => d.data().role !== 'ADMIN').length;
-        
+
+        // ── 2. Kg chính xác từ QR codes đã CONSUMED ──────────────────────────
+        const qrSnap = await getDocs(collection(db, 'qr_codes'));
+        let totalKg = 0;
+        let totalKgCompany = 0;
+        let totalKgIndividual = 0;
+        let monthlyTotals = Array(6).fill(0);
+        const currentMonth = new Date().getMonth();
+
+        qrSnap.forEach((doc: any) => {
+          const qr = doc.data();
+          if (qr.status !== 'CONSUMED') return;
+
+          const pts: number = typeof qr.pointsValue === 'number' ? qr.pointsValue : 0;
+          // Ưu tiên field kg nếu có, fallback: pointsValue × KG_PER_POINT
+          const kgValue: number = typeof qr.kg === 'number' ? qr.kg : pts * KG_PER_POINT;
+
+          totalKg += kgValue;
+          if (qr.type === 'company') {
+            totalKgCompany += kgValue;
+          } else {
+            totalKgIndividual += kgValue;
+          }
+
+          // Ghi vào biểu đồ tháng
+          if (qr.createdAt) {
+            const docDate = qr.createdAt.toDate ? qr.createdAt.toDate() : new Date(qr.createdAt);
+            let monthDiff = currentMonth - docDate.getMonth();
+            if (monthDiff < 0) monthDiff += 12;
+            if (monthDiff < 6) monthlyTotals[5 - monthDiff] += kgValue;
+          }
+        });
+
+        // ── 3. Points & Fraud từ transactions ────────────────────────────────
         const txSnap = await getDocs(collection(db, 'transactions'));
-        
+        let validIssuedPoints = 0;
+        let fraudMap = new Map<string, number>();
+
         txSnap.forEach((doc: any) => {
           const rawTx = { id: doc.id, ...doc.data() } as any;
           const parsedTx = TransactionService.evaluateTransaction(rawTx);
-
-          let riskTraits = 0;
           const safeAmount = parsedTx.amount || 0;
 
           if (parsedTx.status === 'APPROVED' || parsedTx.status === 'COMPLETED') {
-             if (parsedTx.type === 'EARN' || parsedTx.type === 'ORDER') {
-                validIssuedPoints += safeAmount;
-             }
-             if (parsedTx.kg) {
-                totalKg += parsedTx.kg;
-             }
+            if (parsedTx.type === 'EARN' || parsedTx.type === 'ORDER') {
+              validIssuedPoints += safeAmount;
+            }
           }
 
-          // Check Fraud signals
+          // Fraud signals
+          let riskTraits = 0;
           if (safeAmount > 100) riskTraits += 1;
           if (parsedTx.kg && parsedTx.kg > 20) riskTraits += 1;
           if (!parsedTx.qrId && parsedTx.type === 'EARN') riskTraits += 2;
           if (parsedTx.status === 'EXPIRED' || parsedTx.status === 'CANCELLED') riskTraits += 1;
-          
           if (riskTraits > 0 && parsedTx.userId) {
-             fraudMap.set(parsedTx.userId, (fraudMap.get(parsedTx.userId) || 0) + riskTraits);
-          }
-
-          if (parsedTx.createdAt) {
-            const docDate = (parsedTx.createdAt as any).toDate ? (parsedTx.createdAt as any).toDate() : new Date(parsedTx.createdAt);
-            let monthDiff = currentMonth - docDate.getMonth();
-            if (monthDiff < 0) monthDiff += 12;
-            
-            if (monthDiff < 6) {
-              monthlyTotals[5 - monthDiff] += (parsedTx.kg || 0);
-            }
+            fraudMap.set(parsedTx.userId, (fraudMap.get(parsedTx.userId) || 0) + riskTraits);
           }
         });
 
@@ -81,9 +103,9 @@ export default function AdminDashboardScreen() {
         let fraudProfiles: any[] = [];
         fraudMap.forEach((score, uid) => {
           if (score >= 2) {
-             fraudUsers++;
-             const u = usersCache.get(uid);
-             fraudProfiles.push({ uid, score, email: u?.email, name: u?.displayName });
+            fraudUsers++;
+            const u = usersCache.get(uid);
+            fraudProfiles.push({ uid, score, email: u?.email, name: u?.displayName });
           }
         });
         setFraudUsersList(fraudProfiles);
@@ -92,17 +114,19 @@ export default function AdminDashboardScreen() {
           totalUsers: usersCount,
           issuedPoints: validIssuedPoints,
           totalRecycled: totalKg,
+          totalRecycledCo: totalKgCompany,
+          totalRecycledIn: totalKgIndividual,
           co2Saved: totalKg * 2.5,
-          fraudCount: fraudUsers
+          fraudCount: fraudUsers,
         });
 
-        // Format ra giao diện
+        // Biểu đồ
         const newChartData = monthlyTotals.map((val, idx) => {
           let labelMonth = currentMonth - 5 + idx;
           if (labelMonth < 0) labelMonth += 12;
           return {
             label: `T${labelMonth + 1}`,
-            value: val,
+            value: parseFloat(val.toFixed(1)),
             height: val === 0 ? '5%' : `${Math.min(Math.max((val / 50) * 100, 10), 100)}%`
           };
         });
@@ -143,18 +167,42 @@ export default function AdminDashboardScreen() {
       {loading ? (
         <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: 20 }} />
       ) : (
-        <View style={styles.cardRow}>
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="leaf" size={28} color={Colors.primary} />
-            <Text style={styles.statNumber}>{stats.totalRecycled}</Text>
-            <Text style={styles.statDesc}>Kg Rác tái chế</Text>
+        <>
+          <View style={styles.cardRow}>
+            <View style={styles.statCard}>
+              <MaterialCommunityIcons name="leaf" size={28} color={Colors.primary} />
+              <Text style={styles.statNumber}>{stats.totalRecycled.toFixed(1)}</Text>
+              <Text style={styles.statDesc}>Tổng Kg Rác</Text>
+            </View>
+            <View style={styles.statCard}>
+              <MaterialCommunityIcons name="cloud-check" size={28} color="#03A9F4" />
+              <Text style={styles.statNumber}>{stats.co2Saved.toFixed(1)}</Text>
+              <Text style={styles.statDesc}>Kg CO₂ Giảm</Text>
+            </View>
+            <View style={styles.statCard}>
+              <MaterialCommunityIcons name="account-group" size={28} color="#FF9800" />
+              <Text style={styles.statNumber}>{stats.totalUsers}</Text>
+              <Text style={styles.statDesc}>Tổng User</Text>
+            </View>
           </View>
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="cloud-check" size={28} color="#03A9F4" />
-            <Text style={styles.statNumber}>{stats.co2Saved.toFixed(1)} Kg</Text>
-            <Text style={styles.statDesc}>CO2 Giảm thải</Text>
+          {/* Kg breakdown: Công ty vs Cá nhân */}
+          <View style={[styles.cardRow, { marginTop: -Spacing.sm }]}>
+            <View style={[styles.statCard, { flexDirection: 'row', gap: Spacing.sm }]}>
+              <MaterialCommunityIcons name="domain" size={20} color="#1976D2" />
+              <View>
+                <Text style={[styles.statNumber, { fontSize: FontSize.lg }]}>{stats.totalRecycledCo.toFixed(1)} kg</Text>
+                <Text style={styles.statDesc}>Doanh nghiệp</Text>
+              </View>
+            </View>
+            <View style={[styles.statCard, { flexDirection: 'row', gap: Spacing.sm }]}>
+              <MaterialCommunityIcons name="account" size={20} color={Colors.primary} />
+              <View>
+                <Text style={[styles.statNumber, { fontSize: FontSize.lg }]}>{stats.totalRecycledIn.toFixed(1)} kg</Text>
+                <Text style={styles.statDesc}>Cá nhân</Text>
+              </View>
+            </View>
           </View>
-        </View>
+        </>
       )}
 
       <View style={styles.fullCard}>
